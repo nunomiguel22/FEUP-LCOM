@@ -1,0 +1,170 @@
+#include <lcom/lcf.h>
+#include <lcom/timer.h>
+
+#include <stdint.h>
+
+#include "i8254.h"
+
+
+#include <minix/syslib.h>
+
+
+int hook_id;
+extern int irqCounter; 
+int irqCounter = 0;
+
+int (timer_set_frequency)(uint8_t timer, uint32_t freq) {
+  
+  uint8_t status = 0x00;
+  uint8_t timerAddress;
+  uint8_t control;
+  uint8_t controlRegister = TIMER_CTRL;
+  //1234DD sendo o valor do clock em hexadecimal, counter sendo o valor a ser passado para o endereço do timer
+  uint16_t counter = 0x1234DD / freq;
+  uint8_t lsb; 
+  uint8_t msb;
+  timer_get_conf(timer, &status);
+  
+  //guarda os 4 lsb
+  uint8_t lsb4 = status & 0x0F; 
+  
+  /*isola o lsb e msb do counter 
+  IMP: funçoes util_get_LSB e util_get_MSB implementadas no lab2.c*/
+  lsb = 0xff & counter;
+  msb = counter >> 8;
+  
+  //seleciona o timer e prepara a control word
+  switch (timer)
+  {
+	case 0x00:
+		timerAddress = TIMER_0;
+		control = 0x30 | lsb4;
+		break;
+	case 0x01:
+		timerAddress = TIMER_1;
+		control = 0x70 | lsb4;
+		break;
+	case 0x02:
+		timerAddress = TIMER_2;
+		control = 0xB0 | lsb4;
+		break;
+  }
+  
+  //escrever o control
+  sys_outb(controlRegister, control);
+  
+  //escrever lsb seguido de msb para o timer
+  sys_outb(timerAddress, lsb);
+  sys_outb(timerAddress, msb);
+  
+  return 1;
+}
+
+int (timer_subscribe_int)(uint8_t *bit_no) {
+ 
+ hook_id = 1;
+ 
+ sys_irqsetpolicy(0, IRQ_REENABLE, &hook_id);
+ 
+ *bit_no = hook_id;
+
+  return *bit_no;
+}
+
+int (timer_unsubscribe_int)() {
+sys_irqrmpolicy (&hook_id);
+
+  return 1;
+}
+
+void (timer_int_handler)() {
+  //increments global variable counting subscribed interrupts
+  irqCounter++;
+}
+
+int (timer_get_conf)(uint8_t timer, uint8_t *st) {
+	
+uint32_t *statusByte; //temporary pointer as syn_inb uses uint32_t and not uint8_t 
+statusByte = (uint32_t*) malloc (4); 
+
+uint8_t readBackCommand; //this is the command to be load to the control register so we get a readback
+uint8_t timerAddress; //address of the chosen timer
+uint8_t controlRegister = TIMER_CTRL; //address of the control register
+
+//creates the appropriate readback command and loads the chose timer's address
+switch (timer){
+	case 0x00:
+		readBackCommand =	0xE2;
+		timerAddress = TIMER_0;
+		break;
+	case 0x01:
+		readBackCommand = 0xE4;
+		timerAddress = TIMER_1;
+		break;
+	case 0x02:
+		readBackCommand = 0xE8;
+		timerAddress = TIMER_2;	
+		break;
+}
+ 
+//writes the read back commmand to the control register
+sys_outb(controlRegister, readBackCommand); 
+
+//writes the status byte, now in the timer's address to the temporary variable
+sys_inb(timerAddress, statusByte); 
+
+//places the temporary variable in st converting it back to uint8_t
+*st = *statusByte; 
+
+  return 1;
+}
+
+int (timer_display_conf)(uint8_t timer, uint8_t st,
+                        enum timer_status_field field) {
+							
+							union timer_status_field_val status;
+							
+							
+							//places the correct value (depending on field) on the union status
+							switch (field){
+								//field = all
+								case 0:
+										status.byte = st;
+										break;
+								//field = init
+								case 1:
+										if (st & 0x10 && st & 0x20) //LSB followed by MSB
+											status.in_mode = 3;
+										else if 	(st & 0x10) //LSB
+											status.in_mode = 1;
+											else if (st & 0x20) //MSB
+													status.in_mode = 2;
+												else status.in_mode = 0; //invalid
+										break;
+								//field = mode
+								case 2:
+										if (st & 0x02 && st & 0x08) //mode 5
+												status.count_mode = 0x05; 
+										else if (st & 0x08) //mode 4
+													status.count_mode = 0x04;
+											else if (st & 0x02 && st & 0x04) //mode 3
+														status.count_mode = 0x03;
+												else if (st & 0x04) //mode 2
+															status.count_mode = 0x02;
+													else if (st &0x02) //mode 1
+																status.count_mode = 0x01;
+														else status.count_mode = 0x00; //mode 0
+								//field = base;
+								case 3:
+										if (st & 0x01) //BCD
+											status.bcd = true;		
+										else //Binary
+											status.bcd = false;	
+										break;			
+							}
+							
+							//calls print function
+							timer_print_config(timer, field, status);
+							
+ return 1;
+}
