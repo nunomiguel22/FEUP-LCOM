@@ -1,4 +1,4 @@
-# LCOM-Computer_Laboratory
+# LCOM-Computer Laboratory
 
 Labs and group project for Computer Laboratory class at Faculty of Engineering of the University of Porto, using LCF framework on minix
 for low level device access.
